@@ -8,41 +8,41 @@
 @theme {
   --text-xs: 12px;
   --text-xs--line-height: 16px;
-  --text-sm: 13px;
+  --text-sm: 14px;
   --text-sm--line-height: 20px;
-  --text-base: 14px;
-  --text-base--line-height: 22px;
-  --text-lg: 16px;
-  --text-lg--line-height: 24px;
-  --text-xl: 18px;
+  --text-base: 16px;
+  --text-base--line-height: 24px;
+  --text-lg: 18px;
+  --text-lg--line-height: 28px;
+  --text-xl: 20px;
   --text-xl--line-height: 28px;
-  --text-2xl: 20px;
-  --text-2xl--line-height: 30px;
-  --text-3xl: 24px;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 32px;
+  --text-3xl: 30px;
   --text-3xl--line-height: 36px;
-  /* 圆角（redesign §6.2）：卡片 8px、按钮 6px。:root 的 --radius /
-     --radius-sm 是 token 本体，这里把 Tailwind 的 rounded-* 工具
-     映射到同一组值，否则 :root token 改了渲染不变（全站目前没有
-     代码直接引用 var(--radius)）。 */
+  /* 圆角（style-polish T03：卡片 12px、按钮 6px；免费默认 field 12px）。
+     :root 的 --radius / --radius-sm 是 token 本体，这里把 Tailwind 的
+     rounded-* 工具映射到同一组值，否则 :root token 改了渲染不变
+     （全站目前没有代码直接引用 var(--radius)）。 */
   --radius-sm: 6px;
-  --radius-lg: 6px;
-  --radius-xl: 8px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
   --font-sans: "Inter", ui-sans-system, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 :root {
   color-scheme: light;
-  --bg: #f6f7f9;
+  --bg: oklch(0.9702 0 0);
   --bg-elevated: #ffffff;
   --surface: #ffffff;
-  --surface-2: #fafafb;
-  --surface-3: #f1f5f9;
+  --surface-2: oklch(0.9524 0.0013 286.37);
+  --surface-3: oklch(0.9373 0.0013 286.37);
   --text: #0f172a;
   --text-2: #334155;
   --dim: #64748b;
   --dim-2: #94a3b8;
-  --border: #e2e8f0;
+  --border: oklch(90% 0.004 286.32);
   --border-strong: #cbd5e1;
   --accent: #0e7490;
   --accent-strong: #155e75;
@@ -57,7 +57,17 @@
   --ok: #059669;
   --ok-bg: #ecfdf5;
   --violet: #7c3aed;
-  --radius: 8px;
+  --violet-bg: #ede9fe;
+  --violet-strong: #6d28d9;
+  /* 图表色（style-polish T07）：照抄 Pro 公开 oklch 派生公式，以
+     --accent 为中心对称展开；chart-3 即 accent 本身。:root 定义一次，
+     深色态沿用同一公式、由深色 --accent 派生。 */
+  --chart-1: oklch(from var(--accent) calc(l - 0.24) c h);
+  --chart-2: oklch(from var(--accent) calc(l - 0.12) c h);
+  --chart-3: var(--accent);
+  --chart-4: oklch(from var(--accent) calc(l + 0.12) c h);
+  --chart-5: oklch(from var(--accent) calc(l + 0.24) c h);
+  --radius: 12px;
   --radius-sm: 6px;
   /* 间距（redesign §6.2 新增）：4 / 8 / 12 / 16 / 24 / 32px 六档。 */
   --space-1: 4px;
@@ -66,9 +76,9 @@
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
-  --shadow-sm: 0 1px 2px rgba(15,23,42,.04), 0 1px 3px rgba(15,23,42,.06);
-  --shadow-md: 0 4px 12px rgba(15,23,42,.06), 0 2px 4px rgba(15,23,42,.04);
-  --shadow-lg: 0 12px 32px rgba(15,23,42,.12), 0 4px 8px rgba(15,23,42,.06);
+  --shadow-sm: 0 1px 2px rgba(15,23,42,.03), 0 2px 8px rgba(15,23,42,.04);
+  --shadow-md: 0 2px 8px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.06);
+  --shadow-lg: 0 8px 24px rgba(15,23,42,.08), 0 16px 48px rgba(15,23,42,.08);
   --sidebar-bg: #0f172a;
   --sidebar-text: #cbd5e1;
   --sidebar-dim: #94a3b8;
@@ -83,16 +93,16 @@
 
 .dark {
   color-scheme: dark;
-  --bg: #0b1220;
-  --bg-elevated: #111827;
-  --surface: #111a2e;
-  --surface-2: #1a2438;
-  --surface-3: #1e293b;
+  --bg: oklch(12% 0.005 285.823);
+  --bg-elevated: oklch(0.2103 0.0059 285.89);
+  --surface: oklch(0.2103 0.0059 285.89);
+  --surface-2: oklch(0.257 0.0037 286.14);
+  --surface-3: oklch(0.2721 0.0024 247.91);
   --text: #e2e8f0;
-  --text-2: #cbd5e1;
+  --text-2: #dde5f0;
   --dim: #94a3b8;
   --dim-2: #64748b;
-  --border: #1e293b;
+  --border: oklch(28% 0.006 286.033);
   --border-strong: #334155;
   --accent: #22d3ee;
   --accent-strong: #67e8f9;
@@ -106,9 +116,11 @@
   --warn-bg: rgba(251,191,36,.10);
   --ok: #34d399;
   --ok-bg: rgba(52,211,153,.10);
-  --shadow-sm: 0 1px 2px rgba(0,0,0,.25);
-  --shadow-md: 0 4px 12px rgba(0,0,0,.30);
-  --shadow-lg: 0 12px 32px rgba(0,0,0,.45);
+  --violet-bg: rgba(124,58,237,.18);
+  --violet-strong: #c4b5fd;
+  --shadow-sm: 0 0 0 0 transparent;
+  --shadow-md: 0 0 0 0 transparent;
+  --shadow-lg: 0 0 1px 0 rgba(255,255,255,.25) inset;
   --sidebar-bg: #0b1220;
 }
 

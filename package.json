@@ -1,0 +1,42 @@
+{
+  "dependencies": {
+    "@heroui/react": "3.2.8",
+    "@heroui/styles": "3.2.8",
+    "@tanstack/react-query": "5.100.10",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "recharts": "2.15.3"
+  },
+  "description": "纯组件库快照导出（TG 控制台组件库页 + 共享组件，mock 数据）+ GitHub Pages 静态演示。不是 live 代码：改动先走 live 控制台树，再重新导出，绝不在 GitHub 上直接改源码。",
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "bun-plugin-tailwind": "0.1.2",
+    "tailwindcss": "4.3.5",
+    "tailwindcss-safe-area": "1.3.0",
+    "typescript": "5.6.3"
+  },
+  "name": "hero-pro",
+  "packageManager": "bun@1.4.4",
+  "private": true,
+  "scripts": {
+    "build:demo": "bun demo/demo-build.mjs",
+    "test": "bun test client/src/pages/ComponentLibraryPage.test.ts"
+  },
+  "type": "module",
+  "overrides": {
+    "@babel/runtime": "7.29.10",
+    "d3-array": "3.2.4",
+    "d3-color": "3.1.0",
+    "d3-ease": "3.0.1",
+    "d3-format": "3.1.2",
+    "d3-interpolate": "3.0.1",
+    "d3-path": "3.1.0",
+    "d3-scale": "4.0.2",
+    "d3-shape": "3.2.0",
+    "d3-time": "3.1.0",
+    "d3-time-format": "4.1.0",
+    "d3-timer": "3.0.1"
+  }
+}

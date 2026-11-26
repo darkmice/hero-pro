@@ -76,6 +76,7 @@ import {
   Modal,
   Progress,
   Segmented,
+  TableWrap,
   Select,
   Skeleton,
   Slider,
@@ -83,6 +84,8 @@ import {
   Textarea,
 } from "../components/ui";
 import { CellColorPicker, CellSelect, CellSlider, CellSwitch } from "../components/cellRows";
+import { TableHead, makeSortingChangeHandler, sortingFromSort, useAppTable, type AppColumnDef, type ColumnVisibilityState, type SimpleSort } from "../components/dataTable";
+import { flexRender } from "@tanstack/react-table";
 import { TrendChip, trendChipToneClass } from "../components/kpi";
 import { useShellTheme } from "../themeController";
 import type { RouteTab } from "../route";
@@ -107,6 +110,29 @@ const fmtBytes = (n: number) => {
 };
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
+/* ---------- 照片头像（style-polish C08） ----------
+ * mock 用户头像改照片占位：pravatar 免费占位图（70 张真人照，按名哈希
+ * 取号，同一名字永远同一张）；加载失败时回退到字母头像（ui.tsx 的
+ * Avatar），图床被沙箱代理拦时探针以回退态验收。导航处（shell.tsx 的
+ * UserMenu）不在本文件，保留字母头像。不内联 base64、不新增依赖。 */
+export function photoAvatarImg(name: string): number {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 997;
+  return (h % 70) + 1;
+}
+export function photoAvatarUrl(name: string): string {
+  return `https://i.pravatar.cc/80?img=${photoAvatarImg(name)}`;
+}
+function PhotoAvatar({ name, size = 28 }: { name: string; size?: number }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <Avatar name={name} size={size} />;
+  return (
+    <img src={photoAvatarUrl(name)} alt="" aria-hidden="true" width={size} height={size}
+      className="shrink-0 rounded-full object-cover" style={{ width: size, height: size }}
+      onError={() => setFailed(true)} />
+  );
+}
+
 /* ---------- 本页自用的小 glyph（ui.tsx Icon 里没有的几个） ---------- */
 
 function StarSvg({ size = 16, filled = false, className = "" }: { size?: number; filled?: boolean; className?: string }) {
@@ -123,16 +149,16 @@ function HeartSvg({ size = 16, filled = false, className = "" }: { size?: number
     </svg>
   );
 }
-function FolderSvg({ size = 16, className = "" }: { size?: number; className?: string }) {
+function FolderSvg({ size = 16, className = "", filled = false }: { size?: number; className?: string; filled?: boolean }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" className={className} aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" className={className} aria-hidden="true">
       <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
     </svg>
   );
 }
-function FileSvg({ size = 16, className = "" }: { size?: number; className?: string }) {
+function FileSvg({ size = 16, className = "", filled = false }: { size?: number; className?: string; filled?: boolean }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" className={className} aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" className={className} aria-hidden="true">
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
       <path d="M14 2v6h6" />
     </svg>
@@ -176,11 +202,12 @@ function Entry({ id, name, href, status, note, goLabel, onGo, children }: {
   children: ReactNode;
 }) {
   return (
-    <section id={`entry-${id}`} data-entry={id} aria-label={name} className="scroll-mt-28 rounded-[10px] border border-[var(--border)] bg-[var(--surface)]">
+    <section id={`entry-${id}`} data-entry={id} aria-label={name} className="scroll-mt-28 rounded-2xl bg-[var(--surface-2)] p-3">
+      <div className="rounded-xl bg-[var(--surface)] shadow-[var(--shadow-md)]">
       <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-semibold">{name}</h3>
+            <h3 className="text-base font-bold tracking-tight">{name}</h3>
             <Badge tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</Badge>
           </div>
           <p className="mt-1 text-xs leading-5 text-[var(--dim)]">{note} <a className="text-[var(--accent)] underline underline-offset-2" href={href} target="_blank" rel="noreferrer">Pro 文档 ↗</a></p>
@@ -188,6 +215,7 @@ function Entry({ id, name, href, status, note, goLabel, onGo, children }: {
         {onGo && <Button size="sm" variant="secondary" onClick={onGo}>{goLabel ?? "去产品页看"}</Button>}
       </div>
       <div className="px-4 py-4">{children}</div>
+      </div>
     </section>
   );
 }
@@ -196,10 +224,10 @@ function Section({ id, title, desc, children }: { id: string; title: string; des
   return (
     <section id={`section-${id}`} data-section={id} aria-label={title} className="scroll-mt-24">
       <div className="mb-3">
-        <h2 className="text-base font-semibold">{title}</h2>
+        <h2 className="text-xl font-bold tracking-tight">{title}</h2>
         <p className="mt-0.5 text-xs leading-5 text-[var(--dim)]">{desc}</p>
       </div>
-      <div className="space-y-4">{children}</div>
+      <div className="space-y-6">{children}</div>
     </section>
   );
 }
@@ -286,20 +314,71 @@ const TREND_DATA = [
 const CAT_DATA = [
   { name: "广告", value: 38 }, { name: "钓鱼链接", value: 21 }, { name: "刷屏", value: 14 }, { name: "色情", value: 9 }, { name: "其他", value: 18 },
 ];
-const CAT_COLORS = ["#0e7490", "#dc2626", "#d97706", "#7c3aed", "#64748b"];
+const CAT_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
 
 function ChartTooltipCard({ active, payload, label }: { active?: boolean; payload?: { name?: string; value?: number; color?: string }[]; label?: string }) {
   if (!active || !payload || payload.length === 0) return null;
   return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 shadow-lg">
-      {label !== undefined && <p className="text-xs font-medium text-[var(--dim)]">{label}</p>}
+    <div className="rounded-lg border border-white/10 bg-[#0f172a] px-3 py-2 shadow-xl">
+      {label !== undefined && <p className="text-xs font-medium text-slate-400">{label}</p>}
       {payload.map((p, i) => (
         <p key={i} className="flex items-center gap-2 text-xs leading-5">
-          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: p.color ?? "#0e7490" }} />
-          <span className="flex-1 text-[var(--dim)]">{p.name}</span>
-          <span className="font-semibold">{p.value}</span>
+          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: p.color ?? "var(--chart-3)" }} />
+          <span className="flex-1 text-slate-400">{p.name}</span>
+          <span className="font-semibold text-white">{p.value}</span>
         </p>
       ))}
+    </div>
+  );
+}
+
+/* C02：库页内嵌一张 TanStack 真表（R2-1 表基建：useAppTable + TableHead
+ * + TableWrap + Td + flexRender；mock 用户 5 行，表头可点排序，Name 列
+ * 带照片头像）。表字号用 [&_.data-table]:text-sm 顶到 14px（TableWrap
+ * 自带 text-[13px]，ui.tsx 不在本批范围）。 */
+type LibUserRow = { name: string; title: string; email: string; role: string; status: "在职" | "休假" };
+const LIB_USER_ROWS: LibUserRow[] = [
+  { name: "Ada", title: "群组运营", email: "ada@example.com", role: "管理员", status: "在职" },
+  { name: "Grace", title: "内容复核", email: "grace@example.com", role: "复核员", status: "在职" },
+  { name: "Linus", title: "技术支持", email: "linus@example.com", role: "复核员", status: "休假" },
+  { name: "小白", title: "产品经理", email: "xiaobai@example.com", role: "管理员", status: "在职" },
+  { name: "老板", title: "群主", email: "boss@example.com", role: "群主", status: "在职" },
+];
+function DataGridDemo() {
+  const [sort, setSort] = useState<SimpleSort<"name" | "title" | "email" | "role">>({ key: null, dir: "asc" });
+  const [visible, setVisible] = useState<ColumnVisibilityState>({});
+  const columns = useMemo<AppColumnDef<LibUserRow>[]>(() => [
+    { accessorKey: "name", header: "Name", meta: { sortable: true }, cell: ({ row }) => (
+      <span className="flex items-center gap-2"><PhotoAvatar name={row.original.name} size={28} /><span className="font-medium text-[var(--text)]">{row.original.name}</span></span>
+    ) },
+    { accessorKey: "title", header: "Title", meta: { sortable: true }, cell: ({ row }) => row.original.title },
+    { accessorKey: "email", header: "Email", meta: { sortable: true }, cell: ({ row }) => <span className="font-mono2">{row.original.email}</span> },
+    { accessorKey: "role", header: "Role", meta: { sortable: true }, cell: ({ row }) => <Badge tone={row.original.role === "管理员" ? "accent" : row.original.role === "群主" ? "dark" : "neutral"}>{row.original.role}</Badge> },
+    { id: "status", header: "状态", enableSorting: false, cell: ({ row }) => <Badge tone={row.original.status === "在职" ? "success" : "warning"}>{row.original.status}</Badge> },
+    { id: "actions", header: "操作", enableSorting: false, enableHiding: false, meta: { className: "text-right" }, cell: () => <Button size="sm" variant="outline" onClick={() => toast.info("演示：编辑用户（mock）。")}>Edit</Button> },
+  ], []);
+  const table = useAppTable({
+    data: LIB_USER_ROWS,
+    columns,
+    getRowId: (r) => r.name,
+    state: { sorting: sortingFromSort(sort), columnVisibility: visible },
+    onSortingChange: makeSortingChangeHandler(sort, setSort),
+    onColumnVisibilityChange: setVisible,
+  });
+  return (
+    <div className="overflow-hidden rounded-xl border-0 bg-[var(--surface)] shadow-[var(--shadow-md)] [&_.data-table]:text-sm">
+      <TableWrap>
+        <TableHead table={table} />
+        <tbody>
+          {table.getRowModel().rows.map((row) => (
+            <tr key={row.id} className="transition hover:bg-[var(--surface-2)]">
+              {row.getVisibleCells().map((cell) => (
+                <td key={cell.id} className={`border-b border-[var(--border)] px-4 py-2 align-middle text-[var(--text-2)] ${cell.column.columnDef.meta?.className ?? ""}`}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </TableWrap>
     </div>
   );
 }
@@ -314,7 +393,8 @@ function DataSection({ navigate }: { navigate?: NavigateFn }) {
   return (
     <Section id="data" title="数据展示" desc="表格本身是 R2-1 的事（TanStack Table 数据层 + 手写渲染层）；这里演示表格之外的展示形态：空态、批量操作栏、列表、条目行、仪表盘容器、KPI 与 7 张 Recharts 图。">
       <Entry id="data-grid" name="DataGrid" href={PRO("data-grid")} status="r21" note="不用 DataGrid、不用 HeroUI Table。数据层由 @tanstack/react-table 负责，渲染层手写 table + Tailwind；状态用免费 Chip，行操作用 Dropdown + Button，分页用免费 Pagination。表格基建在 R2-1 并行出稿，本条目只作指向。" goLabel="去查杀队列看真表" onGo={() => navigate?.("queue")}>
-        <p className="text-xs leading-5 text-[var(--dim)]">13 类分布表保留 w-full + min-w 640 + sticky 操作列，表宽 = 卡宽有硬断言（R2 验收）。</p>
+        <DataGridDemo />
+        <p className="mt-3 text-xs leading-5 text-[var(--dim)]">表头可点排序；13 类分布表保留 w-full + min-w 640 + sticky 操作列，表宽 = 卡宽有硬断言（R2 验收）。</p>
       </Entry>
       <Entry id="empty-state" name="EmptyState" href={PRO("empty-state")} status="lib" note="手写空态视觉：圆形 muted 背景图标 + h3 标题 + 描述 + 免费 Button；sm / md / lg 三档用 padding / gap 切。用的就是 ui.tsx 的 EmptyState，与产品页同一份代码。">
         <div className="grid gap-3 sm:grid-cols-3">
@@ -332,9 +412,9 @@ function DataSection({ navigate }: { navigate?: NavigateFn }) {
           className="rounded-[10px] border border-[var(--border)] p-1"
         >
           {MOCK_MSGS.map((m) => (
-            <ListBox.Item key={m.id} id={String(m.id)} textValue={`${m.user} ${m.text}`} className="flex items-center gap-2 rounded-lg px-2 py-2">
-              <Avatar name={m.user} size={28} />
-              <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium">{m.user}</span><span className="block truncate text-xs text-[var(--dim)]">{m.text}</span></span>
+            <ListBox.Item key={m.id} id={String(m.id)} textValue={`${m.user} ${m.text}`} className="flex items-center gap-2 rounded-lg px-2 py-2.5">
+              <PhotoAvatar name={m.user} size={28} />
+              <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{m.user}</span><span className="block truncate text-xs text-[var(--dim)]">{m.text}</span></span>
               <span className="text-xs text-[var(--dim)]">{m.time}</span>
             </ListBox.Item>
           ))}
@@ -363,9 +443,9 @@ function DataSection({ navigate }: { navigate?: NavigateFn }) {
           className={listVariant === "primary" ? "rounded-2xl bg-[var(--surface-2)] p-1" : ""}
         >
           {MOCK_MSGS.map((m) => (
-            <ListBox.Item key={m.id} id={String(m.id)} textValue={`${m.user} ${m.text}`} className={listVariant === "primary" ? "flex items-center gap-2 rounded-xl bg-[var(--surface)] px-2 py-2" : "flex items-center gap-2 border-b border-[var(--border)] px-2 py-2"}>
-              <Avatar name={m.user} size={30} />
-              <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium">{m.user}</span><span className="block truncate text-xs text-[var(--dim)]">{m.text}</span></span>
+            <ListBox.Item key={m.id} id={String(m.id)} textValue={`${m.user} ${m.text}`} className={listVariant === "primary" ? "flex items-center gap-2 rounded-xl bg-[var(--surface)] px-2 py-2.5" : "flex items-center gap-2 border-b border-[var(--border)] px-2 py-2.5"}>
+              <PhotoAvatar name={m.user} size={30} />
+              <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{m.user}</span><span className="block truncate text-xs text-[var(--dim)]">{m.text}</span></span>
               <span className="text-xs text-[var(--dim)]">{m.time}</span>
             </ListBox.Item>
           ))}
@@ -404,11 +484,11 @@ function DataSection({ navigate }: { navigate?: NavigateFn }) {
             <div className="h-40 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={TREND_DATA} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis dataKey="d" tick={{ fontSize: 10, fill: "var(--dim)" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: "var(--dim)" }} axisLine={false} tickLine={false} width={28} />
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="d" tick={{ fontSize: 12, fill: "var(--dim)" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 12, fill: "var(--dim)" }} axisLine={false} tickLine={false} width={28} />
                   <RechartsTooltip content={<ChartTooltipCard />} />
-                  <Area type="monotone" dataKey="v" name="命中" stroke="#0e7490" fill="#0e7490" fillOpacity={0.15} strokeWidth={2} />
+                  <Area type="monotone" dataKey="v" name="命中" stroke="var(--chart-3)" fill="var(--chart-3)" fillOpacity={0.15} strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -462,7 +542,7 @@ function KpiChartsSection() {
               <div className="mt-3 h-12 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={k.spark} margin={{ top: 2, right: 2, bottom: 0, left: 2 }}>
-                    <Area type="monotone" dataKey="v" stroke="#0e7490" fill="#0e7490" fillOpacity={0.12} strokeWidth={1.5} />
+                    <Area type="monotone" dataKey="v" stroke="var(--chart-3)" fill="var(--chart-3)" fillOpacity={0.12} strokeWidth={1.5} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -481,21 +561,21 @@ function KpiChartsSection() {
         </div>
       </Entry>
       <Entry id="charts-8" name="AreaChart / BarChart / LineChart / PieChart / RadarChart / RadialChart / ComposedChart" href={PRO("area-chart")} status="r23" note="直接用 Recharts：ResponsiveContainer + 对应图表 + XAxis / YAxis / CartesianGrid / Tooltip；主题覆盖思路照文档（刻度 10px 弱化、默认隐藏轴线与刻度线、网格线弱化、悬停虚线光标）。Radial 单环优先手绘 SVG。">
-        <div className="grid gap-3 md:grid-cols-2">
-          <Card><CardHeader title="面积图 AreaChart" /><div className="h-44 px-2 pb-2"><ResponsiveContainer width="100%" height="100%"><AreaChart data={TREND_DATA} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="d" tick={{ fontSize: 10, fill: "var(--dim)" }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 10, fill: "var(--dim)" }} axisLine={false} tickLine={false} width={28} /><RechartsTooltip content={<ChartTooltipCard />} /><Area type="monotone" dataKey="v" name="命中" stroke="#0e7490" fill="#0e7490" fillOpacity={0.15} strokeWidth={2} /></AreaChart></ResponsiveContainer></div></Card>
-          <Card><CardHeader title="柱状图 BarChart" /><div className="h-44 px-2 pb-2"><ResponsiveContainer width="100%" height="100%"><BarChart data={TREND_DATA} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="d" tick={{ fontSize: 10, fill: "var(--dim)" }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 10, fill: "var(--dim)" }} axisLine={false} tickLine={false} width={28} /><RechartsTooltip content={<ChartTooltipCard />} /><Bar dataKey="v" name="命中" fill="#0e7490" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></div></Card>
-          <Card><CardHeader title="折线图 LineChart" /><div className="h-44 px-2 pb-2"><ResponsiveContainer width="100%" height="100%"><LineChart data={TREND_DATA} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="d" tick={{ fontSize: 10, fill: "var(--dim)" }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 10, fill: "var(--dim)" }} axisLine={false} tickLine={false} width={28} /><RechartsTooltip content={<ChartTooltipCard />} /><Line type="monotone" dataKey="v" name="命中" stroke="#0e7490" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div></Card>
-          <Card><CardHeader title="饼图 PieChart（data / dataKey 挂在 Pie 上，切片分隔用 paddingAngle）" /><div className="h-44 px-2 pb-2"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={CAT_DATA} dataKey="value" nameKey="name" innerRadius={40} outerRadius={65} paddingAngle={3}>{CAT_DATA.map((c, i) => <Cell key={c.name} fill={CAT_COLORS[i % CAT_COLORS.length]} />)}</Pie><RechartsTooltip content={<ChartTooltipCard />} /></PieChart></ResponsiveContainer></div></Card>
-          <Card><CardHeader title="雷达图 RadarChart" /><div className="h-44 px-2 pb-2"><ResponsiveContainer width="100%" height="100%"><RadarChart data={[{ k: "广告", a: 80, b: 60 }, { k: "钓鱼", a: 65, b: 75 }, { k: "刷屏", a: 50, b: 40 }, { k: "色情", a: 70, b: 55 }, { k: "其他", a: 45, b: 65 }]}><PolarGrid stroke="var(--border)" /><PolarAngleAxis dataKey="k" tick={{ fontSize: 10, fill: "var(--dim)" }} /><PolarRadiusAxis tick={false} axisLine={false} /><Radar dataKey="a" name="本周" stroke="#0e7490" fill="#0e7490" fillOpacity={0.25} /><Radar dataKey="b" name="上周" stroke="#7c3aed" fill="#7c3aed" fillOpacity={0.15} /><RechartsTooltip content={<ChartTooltipCard />} /></RadarChart></ResponsiveContainer></div></Card>
-          <Card><CardHeader title="径向图 RadialChart（单环手绘 SVG；多环才用 RadialBarChart）" /><div className="flex h-44 items-center justify-center gap-6 px-2 pb-2">
+        <div className="grid gap-6">
+          <Card><CardHeader title="面积图 AreaChart" /><div className="h-56 px-2 pb-2"><ResponsiveContainer width="100%" height="100%"><AreaChart data={TREND_DATA} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}><CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="d" tick={{ fontSize: 12, fill: "var(--dim)" }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 12, fill: "var(--dim)" }} axisLine={false} tickLine={false} width={28} /><RechartsTooltip content={<ChartTooltipCard />} /><Area type="monotone" dataKey="v" name="命中" stroke="var(--chart-3)" fill="var(--chart-3)" fillOpacity={0.15} strokeWidth={2} /></AreaChart></ResponsiveContainer></div></Card>
+          <Card><CardHeader title="柱状图 BarChart" /><div className="h-56 px-2 pb-2"><ResponsiveContainer width="100%" height="100%"><BarChart data={TREND_DATA} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}><CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="d" tick={{ fontSize: 12, fill: "var(--dim)" }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 12, fill: "var(--dim)" }} axisLine={false} tickLine={false} width={28} /><RechartsTooltip content={<ChartTooltipCard />} /><Bar dataKey="v" name="命中" fill="var(--chart-3)" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></div></Card>
+          <Card><CardHeader title="折线图 LineChart" /><div className="h-56 px-2 pb-2"><ResponsiveContainer width="100%" height="100%"><LineChart data={TREND_DATA} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}><CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="d" tick={{ fontSize: 12, fill: "var(--dim)" }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 12, fill: "var(--dim)" }} axisLine={false} tickLine={false} width={28} /><RechartsTooltip content={<ChartTooltipCard />} /><Line type="monotone" dataKey="v" name="命中" stroke="var(--chart-3)" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div></Card>
+          <Card><CardHeader title="饼图 PieChart（data / dataKey 挂在 Pie 上，切片分隔用 paddingAngle）" /><div className="h-56 px-2 pb-2"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={CAT_DATA} dataKey="value" nameKey="name" innerRadius={40} outerRadius={65} paddingAngle={3}>{CAT_DATA.map((c, i) => <Cell key={c.name} fill={CAT_COLORS[i % CAT_COLORS.length]} />)}</Pie><RechartsTooltip content={<ChartTooltipCard />} /></PieChart></ResponsiveContainer></div></Card>
+          <Card><CardHeader title="雷达图 RadarChart" /><div className="h-56 px-2 pb-2"><ResponsiveContainer width="100%" height="100%"><RadarChart data={[{ k: "广告", a: 80, b: 60 }, { k: "钓鱼", a: 65, b: 75 }, { k: "刷屏", a: 50, b: 40 }, { k: "色情", a: 70, b: 55 }, { k: "其他", a: 45, b: 65 }]}><PolarGrid stroke="var(--border)" /><PolarAngleAxis dataKey="k" tick={{ fontSize: 12, fill: "var(--dim)" }} /><PolarRadiusAxis tick={false} axisLine={false} /><Radar dataKey="a" name="本周" stroke="var(--chart-3)" fill="var(--chart-3)" fillOpacity={0.25} /><Radar dataKey="b" name="上周" stroke="var(--chart-1)" fill="var(--chart-1)" fillOpacity={0.15} /><RechartsTooltip content={<ChartTooltipCard />} /></RadarChart></ResponsiveContainer></div></Card>
+          <Card><CardHeader title="径向图 RadialChart（单环手绘 SVG；多环才用 RadialBarChart）" /><div className="flex h-56 items-center justify-center gap-6 px-2 pb-2">
             <svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="完成度 72%">
               <circle cx="60" cy="60" r="48" fill="none" stroke="var(--surface-3)" strokeWidth="10" />
-              <circle cx="60" cy="60" r="48" fill="none" stroke="#0e7490" strokeWidth="10" strokeLinecap="round" strokeDasharray={`${2 * Math.PI * 48 * 0.72} ${2 * Math.PI * 48}`} transform="rotate(-90 60 60)" />
+              <circle cx="60" cy="60" r="48" fill="none" stroke="var(--chart-3)" strokeWidth="10" strokeLinecap="round" strokeDasharray={`${2 * Math.PI * 48 * 0.72} ${2 * Math.PI * 48}`} transform="rotate(-90 60 60)" />
               <text x="60" y="66" textAnchor="middle" fontSize="18" fontWeight="700" fill="var(--text)">72%</text>
             </svg>
-            <div className="h-28 w-40"><ResponsiveContainer width="100%" height="100%"><RadialBarChart innerRadius="30%" outerRadius="80%" startAngle={90} endAngle={-270} data={[{ name: "A", v: 72 }, { name: "B", v: 45 }]}><RadialBar dataKey="v" background={{ fill: "var(--surface-3)" }}><Cell fill="#0e7490" /><Cell fill="#7c3aed" /></RadialBar><RechartsTooltip content={<ChartTooltipCard />} /></RadialBarChart></ResponsiveContainer></div>
+            <div className="h-28 w-40"><ResponsiveContainer width="100%" height="100%"><RadialBarChart innerRadius="30%" outerRadius="80%" startAngle={90} endAngle={-270} data={[{ name: "A", v: 72 }, { name: "B", v: 45 }]}><RadialBar dataKey="v" background={{ fill: "var(--surface-3)" }}><Cell fill="var(--chart-3)" /><Cell fill="var(--chart-1)" /></RadialBar><RechartsTooltip content={<ChartTooltipCard />} /></RadialBarChart></ResponsiveContainer></div>
           </div></Card>
-          <Card><CardHeader title="组合图 ComposedChart（Bar + Line + Area 同图）" /><div className="h-44 px-2 pb-2"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={TREND_DATA.map((d) => ({ ...d, target: 70, forecast: d.v * 0.9 }))} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="d" tick={{ fontSize: 10, fill: "var(--dim)" }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 10, fill: "var(--dim)" }} axisLine={false} tickLine={false} width={28} /><RechartsTooltip content={<ChartTooltipCard />} /><Bar dataKey="v" name="实际" fill="#0e7490" radius={[4, 4, 0, 0]} /><Line type="monotone" dataKey="target" name="目标" stroke="#d97706" strokeWidth={2} dot={false} /><Area type="monotone" dataKey="forecast" name="预测" stroke="#7c3aed" fill="#7c3aed" fillOpacity={0.1} strokeWidth={1.5} /></ComposedChart></ResponsiveContainer></div></Card>
+          <Card><CardHeader title="组合图 ComposedChart（Bar + Line + Area 同图）" /><div className="h-56 px-2 pb-2"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={TREND_DATA.map((d) => ({ ...d, target: 70, forecast: d.v * 0.9 }))} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}><CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="d" tick={{ fontSize: 12, fill: "var(--dim)" }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 12, fill: "var(--dim)" }} axisLine={false} tickLine={false} width={28} /><RechartsTooltip content={<ChartTooltipCard />} /><Bar dataKey="v" name="实际" fill="var(--chart-3)" radius={[4, 4, 0, 0]} /><Line type="monotone" dataKey="target" name="目标" stroke="var(--chart-1)" strokeWidth={2} dot={false} /><Area type="monotone" dataKey="forecast" name="预测" stroke="var(--chart-5)" fill="var(--chart-5)" fillOpacity={0.1} strokeWidth={1.5} /></ComposedChart></ResponsiveContainer></div></Card>
           <Card><CardHeader title="ChartTooltip（手写卡片，不是独立通用 tooltip）" /><div className="px-4 pb-4"><p className="text-xs leading-5 text-[var(--dim)]">上面每张图的悬停提示用的就是这张卡片：圆角边框 + 表面背景 + 浮层阴影，标题行放 X 轴标签，每系列一行（8px 圆点指示符 + 系列名 + 数值）；labelFormatter / valueFormatter 用手写函数接 Recharts payload。把鼠标移到任意一张图上试试。</p></div></Card>
         </div>
       </Entry>
@@ -507,6 +587,13 @@ function KpiChartsSection() {
 
 /* Cell* 四件的演示状态在 FormSection 里；预设色表与 HSL 解析已收进
  * 共享组件 cellRows.tsx（颜色初始化必须走 HSL，见该文件头注释）。 */
+
+/* C04/C14：库页 Cell 行抛光态——窄居中（外层 max-w-md）+ 无边框柔阴影 +
+ * 行高 48px + 标签 15px（[&_.text-sm] 后代覆盖行内标签字号）。只传给
+ * 库页四行（className 覆盖默认行样式），产品页仍走 cellRows.tsx 的
+ * CELL_ROW_CLASS。 */
+const CELL_ROW_POLISHED_CLASS =
+  "flex w-full items-center justify-between gap-3 rounded-2xl border-0 bg-[var(--surface)] px-4 py-1 text-left shadow-[var(--shadow-md)] min-h-12 [&_.text-sm]:text-[15px] [&_.leading-5]:leading-4";
 
 function FormSection() {
   const [cellSel, setCellSel] = useState("24h");
@@ -534,11 +621,11 @@ function FormSection() {
   return (
     <Section id="form" title="表单增强" desc="Cell* 四件是 R2-2 的共享行组件（标签左、值右、整行可点，移动端设置行首选）；卡片式多选 / 单选、行内下拉、原生下拉、数字步进、分段控制、步骤指示都在这里。">
       <Entry id="cell" name="CellSelect / CellSwitch / CellSlider / CellColorPicker" href={PRO("cell-select")} status="r22" note="本质都是免费同名组件的单元格样式包装。R2-2 已做成共享行组件（client/src/components/cellRows.tsx），下面四行直接引用同一份实现——整行可点（点文字区也触发，点控件本身不重复触发）。">
-        <div className="space-y-2">
-          <CellSelect label="禁言时长" description="刷屏触发后禁言多久" ariaLabel="禁言时长" value={cellSel} onChange={setCellSel} options={[{ value: "1h", label: "1 小时" }, { value: "24h", label: "24 小时" }, { value: "7d", label: "7 天" }]} />
-          <CellSwitch label="新人验证" description="新成员进群先验证再说话" ariaLabel="新人验证" checked={cellSw} onChange={setCellSw} />
-          <CellSlider label="信任分阈值" description="低于此分进人工复核" ariaLabel="信任分阈值" value={cellSlider} onChange={setCellSlider} minValue={0} maxValue={100} />
-          <CellColorPicker label="群组标识色" description="点色块打开颜色面板" value={cellColor} onChange={setCellColor} />
+        <div className="mx-auto max-w-md space-y-2">
+          <CellSelect label="禁言时长" description="刷屏触发后禁言多久" ariaLabel="禁言时长" value={cellSel} onChange={setCellSel} className={CELL_ROW_POLISHED_CLASS} options={[{ value: "1h", label: "1 小时" }, { value: "24h", label: "24 小时" }, { value: "7d", label: "7 天" }]} />
+          <CellSwitch label="新人验证" description="新成员进群先验证再说话" ariaLabel="新人验证" checked={cellSw} onChange={setCellSw} className={CELL_ROW_POLISHED_CLASS} />
+          <CellSlider label="信任分阈值" description="低于此分进人工复核" ariaLabel="信任分阈值" value={cellSlider} onChange={setCellSlider} minValue={0} maxValue={100} className={CELL_ROW_POLISHED_CLASS} />
+          <CellColorPicker label="群组标识色" description="点色块打开颜色面板" value={cellColor} onChange={setCellColor} className={CELL_ROW_POLISHED_CLASS} />
         </div>
       </Entry>
       <Entry id="check-radio-cards" name="CheckboxButtonGroup / RadioButtonGroup" href={PRO("checkbox-button-group")} status="lib" note="免费 CheckboxGroup + Checkbox / RadioGroup + Radio 拼卡片式选项：卡片 + 标题 / 描述 + 右上角指示器，选中加 accent ring；layout 用 flex / grid 切换。">
@@ -609,9 +696,9 @@ function FormSection() {
         <div className="flex flex-wrap items-center gap-4">
           <NumberField aria-label="每页条数" value={stepperNum} onChange={setStepperNum} minValue={1} maxValue={10} step={1}>
             <NumberField.Group className="flex items-center gap-1 rounded-lg border border-[var(--border)] p-1">
-              <NumberField.DecrementButton aria-label="减少" className="flex h-8 w-8 items-center justify-center rounded-md text-base hover:bg-[var(--surface-3)]">−</NumberField.DecrementButton>
+              <NumberField.DecrementButton aria-label="减少" className="flex h-10 w-10 items-center justify-center rounded-md text-base hover:bg-[var(--surface-3)]">−</NumberField.DecrementButton>
               <NumberField.Input className="w-12 bg-transparent text-center text-sm font-semibold tabular-nums outline-none" />
-              <NumberField.IncrementButton aria-label="增加" className="flex h-8 w-8 items-center justify-center rounded-md text-base hover:bg-[var(--surface-3)]">+</NumberField.IncrementButton>
+              <NumberField.IncrementButton aria-label="增加" className="flex h-10 w-10 items-center justify-center rounded-md text-base hover:bg-[var(--surface-3)]">+</NumberField.IncrementButton>
             </NumberField.Group>
           </NumberField>
           <p className="text-xs text-[var(--dim)]">每页 {stepperNum} 条（mock）；直接在框里输数字、点加减、按上下键都行。</p>
@@ -694,8 +781,7 @@ function CommandDemo({ navigate }: { navigate?: NavigateFn }) {
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" className={LIB_DARK_ACCENT_FIX_CLASS} onClick={() => setOpen(true)}>打开命令面板</Button>
-        <kbd className="rounded border border-[var(--border)] bg-[var(--surface-3)] px-1.5 py-0.5 text-[11px]">⌘K</kbd>
+        <Button size="sm" variant="ghost" className="border border-[var(--border)] bg-[var(--surface)]" style={{ borderRadius: 999 }} onClick={() => setOpen(true)}>打开命令面板 <kbd className="rounded border border-[var(--border)] bg-[var(--surface-3)] px-1.5 py-0.5 text-[11px]">⌘K</kbd></Button>
         <span className="text-xs text-[var(--dim)]">过滤默认不区分大小写包含匹配；空结果有 empty state。</span>
       </div>
       <HeroModal state={state}>
@@ -971,7 +1057,7 @@ function TimelineDemo() {
               <span aria-hidden="true" className={`absolute top-1.5 h-3.5 w-3.5 rounded-full ring-4 ring-[var(--surface)] ${axis === "center" ? "left-1/2 -translate-x-1/2" : "left-0"}`} style={{ background: TL_COLOR[it.status] ?? "#64748b" }} />
               <Card>
                 <div className="flex items-start gap-2.5 p-3">
-                  <Avatar name={it.status === "success" ? "Ada" : "Bot"} size={28} />
+                  {it.status === "success" ? <PhotoAvatar name="Ada" size={28} /> : <Avatar name="Bot" size={28} />}
                   <div className="min-w-0 flex-1">
                     <p className="flex flex-wrap items-center gap-2 text-[13px] font-medium">{it.title}<HeroChip size="sm" variant="soft">{it.status}</HeroChip></p>
                     <p className="mt-0.5 text-xs leading-5 text-[var(--dim)]">{it.desc}</p>
@@ -1330,7 +1416,7 @@ function OverlaySection({ navigate, sections, activeSection }: { navigate?: Navi
 
 /* ---------- 六、成页与重型（R2-6） ---------- */
 
-type KanbanCard = { id: number; col: string; title: string; desc: string; priority: "高" | "中" | "低"; user: string };
+type KanbanCard = { id: number; col: string; title: string; desc: string; priority: "高" | "中" | "低"; user: string; cover?: string; progress?: number; comments?: number; attachments?: number };
 
 /** Kanban 优先级 → soft chip 钉色（R2-5/R2-6 收尾批）：复用 kpi 的
  *  trendChipToneClass，把底/字色钉死到控制台 token；本地裸 HeroChip soft
@@ -1388,10 +1474,10 @@ const KANBAN_COLS = [
 ];
 function KanbanDemo() {
   const [cards, setCards] = useState<KanbanCard[]>([
-    { id: 1, col: "todo", title: "钓鱼链接 9.6 分", desc: "ForwardHub · 人工复核", priority: "高", user: "Ada" },
-    { id: 2, col: "todo", title: "广告 9.8 分", desc: "@NextCLi · 消息已删", priority: "高", user: "Grace" },
-    { id: 3, col: "doing", title: "刷屏 12 条", desc: "DeePlanGroup · 已禁言", priority: "中", user: "Linus" },
-    { id: 4, col: "done", title: "色情图片", desc: "CryptoPush · 已删除", priority: "低", user: "小白" },
+    { id: 1, col: "todo", title: "钓鱼链接 9.6 分", desc: "ForwardHub · 人工复核", priority: "高", user: "Ada", cover: "https://picsum.photos/seed/kanban-phish/480/160", progress: 45, comments: 8, attachments: 3 },
+    { id: 2, col: "todo", title: "广告 9.8 分", desc: "@NextCLi · 消息已删", priority: "高", user: "Grace", cover: "https://picsum.photos/seed/kanban-ad/480/160", progress: 70, comments: 5, attachments: 1 },
+    { id: 3, col: "doing", title: "刷屏 12 条", desc: "DeePlanGroup · 已禁言", priority: "中", user: "Linus", cover: "https://picsum.photos/seed/kanban-flood/480/160", progress: 20, comments: 2, attachments: 0 },
+    { id: 4, col: "done", title: "色情图片", desc: "CryptoPush · 已删除", priority: "低", user: "小白", cover: "https://picsum.photos/seed/kanban-done/480/160", progress: 100, comments: 12, attachments: 4 },
   ]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [colSize, setColSize] = useState<"sm" | "md" | "lg">("md");
@@ -1416,13 +1502,13 @@ function KanbanDemo() {
         </span>
         {selected.size > 0 && <HeroChip size="sm" color="accent">已选 {selected.size} 张</HeroChip>}
       </div>
-      <div className="flex gap-3 overflow-x-auto pb-2" role="list" aria-label="看板">
+      <div className="flex gap-4 overflow-x-auto pb-2" role="list" aria-label="看板">
         {KANBAN_COLS.map((col) => {
           const items = cards.filter((c) => c.col === col.id);
           return (
             <div
               key={col.id} role="listitem" aria-label={`${col.title}列`}
-              className="shrink-0 rounded-[10px] bg-[var(--surface-2)] p-2"
+              className="shrink-0 rounded-xl bg-[var(--surface-2)] p-3"
               style={{ width: colW }}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
@@ -1432,34 +1518,54 @@ function KanbanDemo() {
                 dragId.current = null;
               }}
             >
-              <p className="px-1 pb-2 text-[13px] font-semibold">{col.title} <span className="text-xs font-normal text-[var(--dim)]">{items.length}</span></p>
-              <div className="space-y-2">
+              <p className="px-1 pb-2 text-[15px] font-bold">{col.title} <span className="text-xs font-normal text-[var(--dim)]">{items.length}</span></p>
+              <div className="space-y-3">
                 {items.map((c) => (
                   <article
                     key={c.id} draggable
                     onDragStart={() => { dragId.current = c.id; }}
                     onDragEnd={() => { dragId.current = null; }}
-                    className="rounded-[10px] border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm"
+                    className="overflow-hidden rounded-xl border-0 bg-[var(--surface)] shadow-[var(--shadow-md)]"
                   >
+                    {c.cover && (
+                      <div className="h-24 w-full bg-[var(--border)]">
+                        <img src={c.cover} alt="" aria-hidden="true" loading="lazy" className="h-full w-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                      </div>
+                    )}
+                    <div className="p-3">
                     <div className="flex items-start gap-2">
                       <Checkbox label={`选中卡片 ${c.title}`} isSelected={selected.has(c.id)} onChange={(v) => setSelected((prev) => { const n = new Set(prev); if (v) n.add(c.id); else n.delete(c.id); return n; })} />
                       <div className="min-w-0 flex-1">
-                        <p className="text-[13px] font-medium leading-5">{c.title}</p>
-                        <p className="mt-0.5 text-xs text-[var(--dim)]">{c.desc}</p>
+                        <p className="text-[15px] font-semibold leading-6">{c.title}</p>
+                        <p className="mt-0.5 text-[13px] text-[var(--dim)]">{c.desc}</p>
                       </div>
                       <HeroChip size="sm" variant="soft" color={c.priority === "高" ? "danger" : c.priority === "中" ? "warning" : "success"} className={kanbanPriorityChipClass(c.priority)}>{c.priority}</HeroChip>
                     </div>
                     <div className="mt-2 flex items-center justify-between">
-                      <span className="flex items-center gap-1.5 text-xs text-[var(--dim)]"><Avatar name={c.user} size={20} />{c.user}</span>
+                      <span className="flex items-center gap-1.5 text-xs text-[var(--dim)]"><PhotoAvatar name={c.user} size={20} />{c.user}</span>
                       <span className="flex gap-1">
                         <Button size="sm" variant="ghost" aria-label={`把 ${c.title} 移到上一列`} onClick={() => moveCard(c.id, -1)}>←</Button>
                         <Button size="sm" variant="ghost" aria-label={`把 ${c.title} 移到下一列`} onClick={() => moveCard(c.id, 1)}>→</Button>
                       </span>
                     </div>
+                    {c.progress !== undefined && (
+                      <div className="mt-2.5" role="img" aria-label={`进度 ${c.progress}%`}>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-3)]">
+                          <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${c.progress}%` }} />
+                        </div>
+                      </div>
+                    )}
+                    <div className="mt-2 flex items-center gap-3 text-[11px] text-[var(--dim)]">
+                      <span>💬 {c.comments ?? 0}</span>
+                      <span>📎 {c.attachments ?? 0}</span>
+                      <span className="ml-auto">{c.progress ?? 0}%</span>
+                    </div>
+                    </div>
                   </article>
                 ))}
                 {items.length === 0 && <EmptyState icon="inbox" title="这一列是空的" desc="把卡片拖过来，或在上面新建。" />}
               </div>
+              <button type="button" onClick={() => { setCards((prev) => [...prev, { id: Math.max(0, ...prev.map((x) => x.id)) + 1, col: col.id, title: "新任务", desc: "新建 · 待处理", priority: "中", user: "小白" }]); }} className="mt-2 flex w-full items-center gap-1.5 rounded-lg px-2 py-2 text-left text-[13px] font-medium text-[var(--dim)] transition hover:bg-[var(--surface-3)] hover:text-[var(--text)]">+ 添加任务</button>
             </div>
           );
         })}
@@ -1467,6 +1573,14 @@ function KanbanDemo() {
       <p className="text-xs text-[var(--dim)]">拖卡片换列（HTML5 拖拽 + 拖拽手柄语义，聚焦时出现；键盘用卡片上的 ← → 按钮）；卡片支持单选 / 多选；空列可自定义空状态。Pro 用 RAC GridList / DropIndicator + useKanban 三 hook，免费版 3.2.8 未导出 GridList，本实现用原生拖拽 + 同行为契约。</p>
     </div>
   );
+}
+
+/** FileTree 按类型着色（style-polish J-F1）：文件夹 warn soft 底 + 实心
+ * 形；.ts/.tsx accent soft 底 + 实心形；.md 与其余文件 dim 灰。 */
+export function fileTreeIconTone(name: string, kind: "file" | "folder"): { wrap: string; filled: boolean } {
+  if (kind === "folder") return { wrap: "bg-[var(--warn-bg)] text-[var(--warn)]", filled: true };
+  if (/\.tsx?$/.test(name)) return { wrap: "bg-[var(--accent-bg)] text-[var(--accent-strong)]", filled: true };
+  return { wrap: "bg-[var(--surface-3)] text-[var(--dim)]", filled: false };
 }
 
 type TreeNode = { id: string; name: string; kind: "file" | "folder"; children?: TreeNode[] };
@@ -1515,14 +1629,18 @@ function FileTreeDemo() {
           setTree((prev) => moveTree(prev, id, n.kind === "folder" ? n.id : null));
           dragId.current = null;
         }}
-        className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] ${selectedId === n.id ? "bg-[var(--accent-bg)] font-medium" : "hover:bg-[var(--surface-3)]"} ${guides === "always" && depth > 0 ? "border-l border-[var(--border-strong)]" : ""}`}
+        className={`flex items-center gap-1.5 rounded-lg px-2 py-2.5 text-sm ${selectedId === n.id ? "bg-[var(--accent-bg)] font-semibold shadow-[inset_2px_0_0_var(--accent)]" : "hover:bg-[var(--surface-3)]"} ${guides === "always" && depth > 0 ? "border-l border-[var(--border-strong)]" : ""}`}
         style={{ marginLeft: depth * 14 }}
         onClick={() => setSelectedId(n.id)}
       >
         {checkMode && (
           <Checkbox label={`选中 ${n.name}`} isSelected={checked.has(n.id)} onChange={(v) => setChecked((prev) => { const s = new Set(prev); if (v) s.add(n.id); else s.delete(n.id); return s; })} />
         )}
-        {n.kind === "folder" ? <FolderSvg size={15} className="shrink-0 text-[var(--dim)]" /> : <FileSvg size={15} className="shrink-0 text-[var(--dim)]" />}
+        {(() => { const t = fileTreeIconTone(n.name, n.kind); return (
+          <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${t.wrap}`}>
+            {n.kind === "folder" ? <FolderSvg size={15} filled={t.filled} className="shrink-0" /> : <FileSvg size={15} filled={t.filled} className="shrink-0" />}
+          </span>
+        ); })()}
         <span className="truncate">{n.name}</span>
       </div>
     );
@@ -1563,6 +1681,20 @@ function FileTreeDemo() {
    defaultEventDuration 默认 60、month maxEvents 默认 2，行为契约
    与文档一致；拖拽新建 / 移动 / 改时长、跨天移动、键盘操作都做了。 */
 type AgendaEvent = { id: string; title: string; start: Date; end: Date; color?: string; isAllDay?: boolean; isReadOnly?: boolean; status?: "confirmed" | "unconfirmed" | "declined" };
+
+/** Agenda 事件块 soft 配色（style-polish C07）：高饱和实底 + 白字改
+ * 彩色文字 + 浅色底；未确认态不在此处理（仍走 surface 白底 + 虚线边框）。
+ * 颜色只认 mock 里出现的 6 个色值，其余一律落 surface-3 + dim。 */
+export function agendaEventSoft(color?: string): { background: string; color: string } {
+  switch (color) {
+    case "#0e7490": return { background: "var(--accent-bg)", color: "var(--accent-strong)" };
+    case "#dc2626": return { background: "var(--danger-bg)", color: "var(--danger)" };
+    case "#7c3aed": return { background: "var(--violet-bg)", color: "var(--violet-strong)" };
+    case "#047857": return { background: "var(--ok-bg)", color: "var(--ok)" };
+    case "#b45309": return { background: "var(--warn-bg)", color: "var(--warn)" };
+    default: return { background: "var(--surface-3)", color: "var(--dim)" };
+  }
+}
 const HOUR_PX = 60;
 const snapMin = (m: number, snap = 5) => Math.round(m / snap) * snap;
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -1697,7 +1829,7 @@ function AgendaDemo() {
           {allDayOpen && allDayEvents.length > 0 && (
             <div className="space-y-1 border border-t-0 border-[var(--border)] px-2 py-2">
               {allDayEvents.map((e) => (
-                <div key={e.id} className="rounded-md px-2 py-1 text-xs font-medium text-white" style={{ background: e.color ?? "#0e7490" }}>
+                <div key={e.id} className="rounded-md px-2 py-1 text-xs font-medium" style={agendaEventSoft(e.color)}>
                   {e.title}（{e.start.getMonth() + 1}/{e.start.getDate()} – {addDays(e.end, -1).getMonth() + 1}/{addDays(e.end, -1).getDate()}）
                 </div>
               ))}
@@ -1736,7 +1868,7 @@ function AgendaDemo() {
                         onKeyDown={onEventKeyDown(e)}
                         onClick={() => setSelectedId(e.id)}
                         className={`absolute inset-x-1 z-10 overflow-hidden rounded-md px-1.5 py-1 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)] ${selectedId === e.id ? "ring-2 ring-[var(--accent)]" : ""} ${e.status === "unconfirmed" ? "border border-dashed" : "border border-transparent"} ${isPast(e) ? "opacity-60" : ""}`}
-                        style={{ top, height: h, background: e.status === "unconfirmed" ? "var(--surface)" : e.color ?? "#0e7490", color: e.status === "unconfirmed" ? "var(--text)" : "#fff", borderColor: e.status === "unconfirmed" ? (e.color ?? "#0e7490") : undefined }}
+                        style={{ top, height: h, ...(e.status === "unconfirmed" ? { background: "var(--surface)", color: "var(--text)" } : agendaEventSoft(e.color)), borderColor: e.status === "unconfirmed" ? (e.color ?? "#0e7490") : undefined }}
                       >
                         <span className={`block truncate font-medium ${e.status === "declined" ? "line-through" : ""}`}>{e.title}</span>
                         {!short && <span className="block opacity-90">{e.start.getHours()}:{String(e.start.getMinutes()).padStart(2, "0")} – {e.end.getHours()}:{String(e.end.getMinutes()).padStart(2, "0")}{e.isReadOnly ? " · 只读" : ""}</span>}
@@ -1768,7 +1900,7 @@ function AgendaDemo() {
                 <div key={day.toISOString()} className={`min-h-24 border-b border-r border-[var(--border)] p-1 last:border-r-0 ${day.getDay() === 0 || day.getDay() === 6 ? "bg-[var(--surface-2)]" : ""} ${inMonth ? "" : "opacity-50"}`} data-today={sameDay(day, today) ? true : undefined}>
                   <button type="button" className={`text-xs font-medium ${sameDay(day, today) ? "rounded-full bg-[var(--accent)] px-1.5 text-white " + LIB_DARK_ACCENT_FIX_CLASS : ""}`} onClick={() => { setCursor(day); setView("day"); }}>{day.getDate()}</button>
                   {shown.map((e) => (
-                    <button key={e.id} type="button" className="mt-0.5 block w-full truncate rounded px-1 py-0.5 text-left text-[11px] text-white" style={{ background: e.color ?? "#0e7490" }} onClick={() => setSelectedId(e.id)}>{e.title}</button>
+                    <button key={e.id} type="button" className="mt-0.5 block w-full truncate rounded px-1 py-0.5 text-left text-[11px] font-medium" style={agendaEventSoft(e.color)} onClick={() => setSelectedId(e.id)}>{e.title}</button>
                   ))}
                   {more > 0 && <button type="button" className="mt-0.5 text-[11px] text-[var(--accent)]" onClick={() => { setCursor(day); setView("day"); }}>{more} more</button>}
                 </div>
@@ -1793,12 +1925,15 @@ function AgendaDemo() {
   );
 }
 
+/* J-C1/C07：幻灯片不再是大面积高饱和渐变——低饱和单色底 + 封面照片
+ * （picsum seed 占位，加载失败时只剩低饱和底色，不留破图）+ 标题 /
+ * 副信息 / meta 行内容层。 */
 const CAROUSEL_SLIDES = [
-  { title: "总览", desc: "KPI 行 + 图表 + 表格", bg: "linear-gradient(135deg,#0e7490,#22d3ee)" },
-  { title: "查杀队列", desc: "待处置条目与行内操作", bg: "linear-gradient(135deg,#7c3aed,#c084fc)" },
-  { title: "闭环中心", desc: "验证 / 申诉 / 信任分", bg: "linear-gradient(135deg,#059669,#34d399)" },
-  { title: "群组与 Bot", desc: "4 个群 · 8 项能力", bg: "linear-gradient(135deg,#d97706,#fbbf24)" },
-  { title: "处置日志", desc: "审计与回流调阈值", bg: "linear-gradient(135deg,#dc2626,#f87171)" },
+  { title: "总览", desc: "KPI 行 + 图表 + 表格", meta: "今日 128 条命中", cover: "https://picsum.photos/seed/carousel-overview/640/240", bg: "linear-gradient(135deg,#475569,#64748b)" },
+  { title: "查杀队列", desc: "待处置条目与行内操作", meta: "12 条待处理", cover: "https://picsum.photos/seed/carousel-queue/640/240", bg: "linear-gradient(135deg,#334155,#475569)" },
+  { title: "闭环中心", desc: "验证 / 申诉 / 信任分", meta: "申诉 3 条待复核", cover: "https://picsum.photos/seed/carousel-loop/640/240", bg: "linear-gradient(135deg,#3f3f46,#52525b)" },
+  { title: "群组与 Bot", desc: "4 个群 · 8 项能力", meta: "4 个群 · 4,211 位成员", cover: "https://picsum.photos/seed/carousel-groups/640/240", bg: "linear-gradient(135deg,#44403c,#57534e)" },
+  { title: "处置日志", desc: "审计与回流调阈值", meta: "今日已处置 96 条", cover: "https://picsum.photos/seed/carousel-logs/640/240", bg: "linear-gradient(135deg,#1e293b,#334155)" },
 ];
 function CarouselView({ layout, loop, perView, autoplay }: { layout: "inplace" | "miniatures"; loop: boolean; perView: number; autoplay: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -1834,9 +1969,14 @@ function CarouselView({ layout, loop, perView, autoplay }: { layout: "inplace" |
         <div ref={ref} className="flex snap-x snap-mandatory overflow-x-auto scroll-smooth rounded-[10px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {CAROUSEL_SLIDES.map((s) => (
             <div key={s.title} className="h-36 shrink-0 snap-start p-1" style={{ flexBasis: `${100 / perView}%` }}>
-              <div className="flex h-full flex-col justify-end rounded-lg p-3 text-white" style={{ background: s.bg }}>
-                <p className="text-sm font-semibold">{s.title}</p>
-                <p className="text-xs opacity-90">{s.desc}</p>
+              <div className="relative flex h-full flex-col justify-end overflow-hidden rounded-lg text-white" style={{ background: s.bg }}>
+                <img src={s.cover} alt="" aria-hidden="true" loading="lazy" className="absolute inset-0 h-full w-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
+                <div className="relative p-3">
+                  <p className="text-base font-semibold">{s.title}</p>
+                  <p className="text-xs opacity-90">{s.desc}</p>
+                  <p className="mt-1 text-[11px] opacity-75">{s.meta}</p>
+                </div>
               </div>
             </div>
           ))}
@@ -1851,7 +1991,7 @@ function CarouselView({ layout, loop, perView, autoplay }: { layout: "inplace" |
       <div className="mt-2 flex items-center justify-between">
         <span className="flex gap-1.5">
           {dots > 1 && Array.from({ length: dots }, (_, i) => (
-            <button key={i} type="button" aria-label={`跳到第 ${i + 1} 组`} onClick={() => go(i)} className={`h-1.5 rounded-full transition-all ${i === index ? "w-5 bg-[var(--accent)]" : "w-1.5 bg-[var(--border-strong)]"}`} />
+            <button key={i} type="button" aria-label={`跳到第 ${i + 1} 组`} onClick={() => go(i)} className={`h-2 w-2 min-h-0 rounded-full transition-all ${i === index ? "bg-[var(--accent)]" : "border border-[var(--border-strong)] bg-transparent"}`} />
           ))}
         </span>
         {layout === "inplace" && (
@@ -1928,7 +2068,7 @@ function HoloCardDemo() {
           role="img" aria-label="全息会员卡演示：群盾卫士 Pro 会员"
           className="relative h-[453px] w-[302px] max-w-full overflow-hidden rounded-2xl border border-[var(--border)] text-white transition-transform duration-150 ease-out"
           style={{
-            background: "linear-gradient(150deg,#0e7490 0%,#155e75 40%,#7c3aed 100%)",
+            background: "linear-gradient(150deg,#1e293b 0%,#334155 55%,#475569 100%)",
             transform: active ? `rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg)` : "none",
             transformStyle: "preserve-3d",
           }}
@@ -2487,7 +2627,7 @@ function ApprovalCardView({ questions, onSubmit }: { questions: ApprovalQuestion
   }
   const visibleDots = questions.slice(Math.max(0, Math.min(step - 3, questions.length - 7)), Math.max(0, Math.min(step - 3, questions.length - 7)) + 7);
   return (
-    <div className="max-w-md rounded-[10px] border border-[var(--border)] bg-[var(--surface)]">
+    <div className="max-w-md rounded-xl border-0 bg-[var(--surface)] shadow-[var(--shadow-md)]">
       <div className="flex items-start justify-between border-b border-[var(--border)] px-4 py-3">
         <h4 className="text-sm font-semibold">{q.title}</h4>
         <Button size="sm" variant="ghost" aria-label="关闭审批" onClick={() => onSubmit({ answers, skipped: [...skipped, q.id] })}>✕</Button>
@@ -2497,7 +2637,7 @@ function ApprovalCardView({ questions, onSubmit }: { questions: ApprovalQuestion
           q.multiSelect ? (
             <HeroCheckboxGroup value={sel} onChange={(v) => setAnswers((a) => ({ ...a, [q.id]: [...v] }))} aria-label={q.title} className="space-y-1">
               {q.options.map((o) => (
-                <HeroCheckbox key={o.id} value={o.id} className="rounded-lg px-2 py-1.5 hover:bg-[var(--surface-3)]">
+                <HeroCheckbox key={o.id} value={o.id} className="rounded-lg px-2 py-1.5 hover:bg-[var(--surface-3)] data-[selected=true]:bg-[var(--accent-bg)] data-[selected=true]:ring-1 data-[selected=true]:ring-[var(--accent)]">
                   <HeroCheckbox.Content className="items-start gap-2">
                     <HeroCheckbox.Control><HeroCheckbox.Indicator /></HeroCheckbox.Control>
                     <span><span className="block text-[13px] font-medium">{o.label}</span>{o.description && <span className="block text-xs text-[var(--dim)]">{o.description}</span>}</span>
@@ -2508,7 +2648,7 @@ function ApprovalCardView({ questions, onSubmit }: { questions: ApprovalQuestion
           ) : (
             <RadioGroup value={sel[0] ?? ""} onChange={(v) => setAnswers((a) => ({ ...a, [q.id]: [v] }))} aria-label={q.title} className="space-y-1">
               {q.options.map((o) => (
-                <Radio key={o.id} value={o.id} className="rounded-lg px-2 py-1.5 hover:bg-[var(--surface-3)]">
+                <Radio key={o.id} value={o.id} className="rounded-lg px-2 py-1.5 hover:bg-[var(--surface-3)] data-[selected=true]:bg-[var(--accent-bg)] data-[selected=true]:ring-1 data-[selected=true]:ring-[var(--accent)]">
                   <Radio.Content className="items-start gap-2">
                     <Radio.Control><Radio.Indicator /></Radio.Control>
                     <span><span className="block text-[13px] font-medium">{o.label}</span>{o.description && <span className="block text-xs text-[var(--dim)]">{o.description}</span>}</span>
@@ -2539,7 +2679,7 @@ function ApprovalCardView({ questions, onSubmit }: { questions: ApprovalQuestion
         </span>
         <span className="flex gap-2">
           {q.allowSkip !== false && <Button size="sm" variant="ghost" onClick={() => submitStep(true)}>跳过 <kbd className="ml-1 rounded border border-[var(--border)] bg-[var(--surface-3)] px-1 py-0.5 text-[10px]">S</kbd></Button>}
-          <Button size="sm" className={LIB_DARK_ACCENT_FIX_CLASS} disabled={!canContinue && !isLast} onClick={() => submitStep(false)}>{isLast ? "发送" : "继续"} <kbd className="ml-1 rounded border border-[var(--border)] bg-[var(--surface-3)] px-1 py-0.5 text-[10px] text-[var(--text)]">↵</kbd></Button>
+          <Button size="sm" className={LIB_DARK_ACCENT_FIX_CLASS} style={{ height: 40, fontSize: 15, borderRadius: 12 }} disabled={!canContinue && !isLast} onClick={() => submitStep(false)}>{isLast ? "发送" : "继续"} <kbd className="ml-1 rounded border border-[var(--border)] bg-[var(--surface-3)] px-1 py-0.5 text-[10px] text-[var(--text)]">↵</kbd></Button>
         </span>
       </div>
     </div>
@@ -2641,6 +2781,14 @@ const AI_MODELS: AiModel[] = [
   { id: "sonnet", name: "Claude Sonnet 4.5", shortName: "Sonnet 4.5", provider: "Anthropic", description: "日常处置又快又稳。", intelligence: 4, speed: 5, contextWindow: 200_000, efforts: [{ id: "low", label: "Low" }, { id: "high", label: "High", tone: "max" }], defaultEffort: "low" },
   { id: "gpt", name: "GPT-5.2", shortName: "GPT-5.2", provider: "OpenAI", description: "通用对话与摘要。", intelligence: 4, speed: 4, contextWindow: 400_000, efforts: [{ id: "low", label: "Low" }], defaultEffort: "low", isDisabled: true },
 ];
+/** J-M1：模型行厂商色 soft 底 + 图标槽。Google 青系、Anthropic 紫系、
+ * OpenAI 琥珀系；字母保留并加粗。 */
+export function modelVendorTone(provider: string): string {
+  if (provider === "Google") return "bg-[var(--accent-bg)] text-[var(--accent-strong)]";
+  if (provider === "Anthropic") return "bg-[var(--violet-bg)] text-[var(--violet-strong)]";
+  return "bg-[var(--warn-bg)] text-[var(--warn)]";
+}
+
 function ModelSelectorView({ value, onChange }: { value: string; onChange: (id: string) => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -2663,7 +2811,7 @@ function ModelSelectorView({ value, onChange }: { value: string; onChange: (id: 
     <Popover isOpen={open} onOpenChange={(v) => { setOpen(v); if (!v) setQuery(""); }}>
       <Popover.Trigger>
         <HeroButton variant="ghost" size="sm" aria-label={`模型：${model.name}`} className="gap-1.5 text-xs font-medium">
-          <span className="flex h-5 w-5 items-center justify-center rounded bg-[var(--surface-3)] text-[10px] font-bold">{model.shortName[0]}</span>
+          <span className={`flex h-5 w-5 items-center justify-center rounded ${modelVendorTone(model.provider)} text-[10px] font-bold`}>{model.shortName[0]}</span>
           {model.shortName} <Icon name="chevron" size={12} className={open ? "rotate-180" : ""} />
         </HeroButton>
       </Popover.Trigger>
@@ -2684,8 +2832,8 @@ function ModelSelectorView({ value, onChange }: { value: string; onChange: (id: 
                 <ListBox.Section key={g} aria-label={g}>
                   <ListBox.Item id={`__h-${g}`} textValue={g} isDisabled className="px-2 pt-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--dim)]">{g}</ListBox.Item>
                   {filtered.filter((m) => m.provider === g).map((m) => (
-                    <ListBox.Item key={m.id} id={m.id} textValue={m.name} isDisabled={m.isDisabled} className="flex items-center gap-2 rounded-lg px-2 py-2 text-[13px]" onMouseEnter={() => setHovered(m)} onFocus={() => setHovered(m)}>
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[var(--surface-3)] text-[11px] font-bold">{m.shortName[0]}</span>
+                    <ListBox.Item key={m.id} id={m.id} textValue={m.name} isDisabled={m.isDisabled} className="flex items-center gap-2 rounded-lg px-2 py-2.5 text-sm" onMouseEnter={() => setHovered(m)} onFocus={() => setHovered(m)}>
+                      <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${modelVendorTone(m.provider)} text-[11px] font-bold`}>{m.shortName[0]}</span>
                       <span className="min-w-0 flex-1 truncate">{m.name}</span>
                       {m.badge && <HeroChip size="sm" variant="soft">{m.badge}</HeroChip>}
                       {m.id === value && <span aria-hidden="true" className="text-[var(--accent)]">✓</span>}
@@ -2706,9 +2854,9 @@ function ModelSelectorView({ value, onChange }: { value: string; onChange: (id: 
             )}
           </div>
           {(hovered ?? model) && (
-            <div className="hidden w-44 shrink-0 rounded-[10px] border border-[var(--border)] bg-[var(--surface-2)] p-3 sm:block">
-              <p className="flex items-center gap-2 text-[13px] font-semibold"><span className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--surface-3)] text-[11px] font-bold">{(hovered ?? model).shortName[0]}</span>{(hovered ?? model).name}</p>
-              <p className="mt-1.5 text-xs leading-5 text-[var(--dim)]">{(hovered ?? model).description}</p>
+            <div className="hidden w-44 shrink-0 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] p-3 sm:block">
+              <p className="flex items-center gap-2 text-[15px] font-semibold"><span className={`flex h-6 w-6 items-center justify-center rounded-md ${modelVendorTone((hovered ?? model).provider)} text-[11px] font-bold`}>{(hovered ?? model).shortName[0]}</span>{(hovered ?? model).name}</p>
+              <p className="mt-1.5 text-[13px] leading-5 text-[var(--dim)]">{(hovered ?? model).description}</p>
               <p className="mt-2 flex items-center justify-between text-xs"><span>Intelligence</span><span className="flex gap-0.5">{dots((hovered ?? model).intelligence)}</span></p>
               <p className="mt-1 flex items-center justify-between text-xs"><span>Speed</span><span className="flex gap-0.5">{dots((hovered ?? model).speed)}</span></p>
               <p className="mt-1 text-xs text-[var(--dim)]">{fmtInt((hovered ?? model).contextWindow)} context window</p>
@@ -2951,7 +3099,7 @@ function AiPlayground() {
             )}
             <div
               data-drop-target={dragOver ? "true" : undefined}
-              className={`rounded-[10px] border ${dragOver ? "border-dashed border-[var(--accent)] bg-[var(--accent-bg)]" : "border-[var(--border)]"} ${layout === "compact" ? "px-2 py-1.5" : "p-2"}`}
+              className={`rounded-2xl ${dragOver ? "border border-dashed border-[var(--accent)] bg-[var(--accent-bg)]" : "border-0 bg-[var(--surface)] shadow-[var(--shadow-lg)]"} ${layout === "compact" ? "px-2 py-1.5" : "p-2"}`}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               onDrop={(e) => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); }}
@@ -2967,7 +3115,7 @@ function AiPlayground() {
                     <Menu aria-label="@ 提及">
                       {mentionUsers.map((u) => (
                         <Menu.Item key={u} id={u} textValue={u} onAction={() => { setComposer((c) => c.replace(/@[^\s@]*$/, `@${u} `)); setMentionOpen(false); }}>
-                          <Avatar name={u} size={20} /> {u}
+                          <PhotoAvatar name={u} size={20} /> {u}
                           <Menu.ItemIndicator />
                         </Menu.Item>
                       ))}
@@ -2983,7 +3131,7 @@ function AiPlayground() {
                   <span className="flex items-center gap-1">
                     <Segmented value={layout} onChange={setLayout} ariaLabel="输入框布局" options={[{ value: "stacked", label: "stacked" }, { value: "compact", label: "compact" }, { value: "inline", label: "inline" }]} />
                     {status === "ready" ? (
-                      <Button size="sm" aria-label="发送" className={LIB_DARK_ACCENT_FIX_CLASS} onClick={() => send()} disabled={!composer.trim()}>发送 ↑</Button>
+                      <Button size="sm" aria-label="发送" className={`shrink-0 ${LIB_DARK_ACCENT_FIX_CLASS}`} style={{ width: 36, height: 36, minHeight: 36, borderRadius: 999, padding: 0 }} onClick={() => send()} disabled={!composer.trim()}>↑</Button>
                     ) : (
                       <Button size="sm" variant="secondary" aria-label="停止生成" onClick={stop}>■ 停止</Button>
                     )}
@@ -3187,15 +3335,20 @@ function AiSection() {
       </Entry>
       <Entry id="prompt-input" name="PromptInput" href={PRO("prompt-input")} status="lib" note="聊天与 agent 界面的消息输入框：Shell / Content / Attachments / TextArea / Toolbar / Send；Queue 在输入框上方放排队追问（可拖拽重排）；TokenInput 是 RAC TokenField（alpha），@ 提及菜单锚在光标处；状态 ready / submitted / streaming / error 切换发送与停止行为；lockInputOnRun 默认 true。完整版见上方对话演示，这里只验状态切换。">
         <div className="flex flex-wrap items-center gap-2">
-          <Segmented value={promptStatus} onChange={setPromptStatus} ariaLabel="运行状态" options={[{ value: "ready", label: "ready" }, { value: "submitted", label: "submitted" }, { value: "streaming", label: "streaming" }, { value: "error", label: "error" }]} />
-          <span className="flex items-center gap-2 rounded-[10px] border border-[var(--border)] px-2 py-1.5">
+          <span className="flex items-center gap-2 rounded-2xl border-0 bg-[var(--surface)] px-2 py-1.5 shadow-[var(--shadow-md)]">
             <Textarea aria-label="迷你输入框" placeholder="What do you want to know?" value={promptMini} onChange={(e) => setPromptMini(e.target.value)} rows={1} className="!border-0 !py-1 shadow-none" />
-            {promptStatus === "ready" ? <Button size="sm" aria-label="发送" className={LIB_DARK_ACCENT_FIX_CLASS} onClick={() => { if (promptMini.trim()) { setPromptStatus("submitted"); window.setTimeout(() => setPromptStatus("ready"), 1200); } }}>↑ 发送</Button>
+            {promptStatus === "ready" ? <Button size="sm" aria-label="发送" className={`shrink-0 ${LIB_DARK_ACCENT_FIX_CLASS}`} style={{ width: 36, height: 36, minHeight: 36, borderRadius: 999, padding: 0 }} onClick={() => { if (promptMini.trim()) { setPromptStatus("submitted"); window.setTimeout(() => setPromptStatus("ready"), 1200); } }}>↑</Button>
               : promptStatus === "error" ? <Button size="sm" variant="secondary" aria-label="重试" onClick={() => setPromptStatus("ready")}>↻ 重试</Button>
               : <Button size="sm" variant="secondary" aria-label="停止" onClick={() => setPromptStatus("ready")}>■ 停止</Button>}
           </span>
           <span className="text-xs text-[var(--dim)]">{promptStatus === "ready" ? "就绪" : promptStatus === "submitted" ? "已提交，输入框锁定" : promptStatus === "streaming" ? "生成中，发送变停止" : "出错，发送变重试"}</span>
         </div>
+        <details className="mt-3 rounded-xl border border-[var(--border)] px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium text-[var(--dim)]">调试：运行状态切换</summary>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Segmented value={promptStatus} onChange={setPromptStatus} ariaLabel="运行状态" options={[{ value: "ready", label: "ready" }, { value: "submitted", label: "submitted" }, { value: "streaming", label: "streaming" }, { value: "error", label: "error" }]} />
+          </div>
+        </details>
       </Entry>
       <Entry id="prompt-suggestion" name="PromptSuggestion" href={PRO("prompt-suggestion")} status="lib" note="空聊天里的建议提示：Header（Title + Description）+ Items；pill（默认）与 card（带描述 / 标签 / 底部时）两态；点一条把它填进输入框（上方演示场的输入框）。">
         <div className="mb-3 flex items-center gap-2">
@@ -3266,6 +3419,84 @@ const LIB_SECTIONS = [
   { id: "ai", title: "AI 类（18 件）" },
 ];
 
+/* L05 右侧本页目录：当前分组的条目（id 与 Entry 的 id 一一对应，
+   点条目用 scrollIntoView，不用 href 锚点——控制台用 hash 路由，
+   href="#entry-…" 会改路由跳页）。 */
+const LIB_ENTRIES: Record<string, { id: string; title: string }[]> = {
+  shell: [
+    { id: "app-layout", title: "AppLayout" },
+    { id: "sidebar", title: "Sidebar" },
+    { id: "navbar", title: "Navbar" },
+    { id: "drawer", title: "Drawer（已落地）" },
+    { id: "dropdown", title: "Dropdown（已落地）" },
+    { id: "toast", title: "Toast（已落地）" },
+    { id: "modal-sheet", title: "Modal / Sheet" },
+  ],
+  data: [
+    { id: "data-grid", title: "DataGrid" },
+    { id: "empty-state", title: "EmptyState" },
+    { id: "action-bar", title: "ActionBar" },
+    { id: "list-view", title: "ListView" },
+    { id: "item-card", title: "ItemCard / ItemCardGroup" },
+    { id: "widget", title: "Widget" },
+  ],
+  charts: [
+    { id: "kpi", title: "KPI / KPIGroup" },
+    { id: "charts-8", title: "图表 7 件" },
+  ],
+  form: [
+    { id: "cell", title: "CellSelect / CellSwitch / CellSlider / CellColorPicker" },
+    { id: "check-radio-cards", title: "CheckboxButtonGroup / RadioButtonGroup" },
+    { id: "inline-native-select", title: "InlineSelect / NativeSelect" },
+    { id: "number-stepper", title: "NumberStepper" },
+    { id: "segment", title: "Segment" },
+    { id: "stepper", title: "Stepper" },
+  ],
+  overlay: [
+    { id: "command", title: "Command" },
+    { id: "context-menu", title: "ContextMenu" },
+    { id: "hover-card", title: "HoverCard" },
+    { id: "drop-zone", title: "DropZone" },
+    { id: "rating", title: "Rating" },
+    { id: "timeline", title: "Timeline" },
+    { id: "floating-toc", title: "FloatingTOC" },
+    { id: "pressable-feedback", title: "PressableFeedback" },
+    { id: "emoji-reaction-button", title: "EmojiReactionButton" },
+    { id: "emoji-picker", title: "EmojiPicker" },
+    { id: "resizable", title: "Resizable 拖拽面板组" },
+  ],
+  heavy: [
+    { id: "kanban", title: "Kanban" },
+    { id: "agenda", title: "Agenda" },
+    { id: "file-tree", title: "FileTree" },
+    { id: "carousel", title: "Carousel" },
+    { id: "holo-card", title: "HoloCard" },
+    { id: "map", title: "Map" },
+    { id: "rich-text-editor", title: "RichTextEditor" },
+  ],
+  ai: [
+    { id: "ai-playground", title: "AI 助手演示场" },
+    { id: "approval-card", title: "ApprovalCard" },
+    { id: "chain-of-thought", title: "ChainOfThought" },
+    { id: "chat-attachment", title: "ChatAttachment" },
+    { id: "chat-conversation", title: "ChatConversation" },
+    { id: "chat-list-view", title: "ChatListView" },
+    { id: "chat-loader", title: "ChatLoader" },
+    { id: "chat-message", title: "ChatMessage" },
+    { id: "chat-message-actions", title: "ChatMessageActions" },
+    { id: "chat-source", title: "ChatSource" },
+    { id: "chat-tool", title: "ChatTool" },
+    { id: "code-block", title: "CodeBlock" },
+    { id: "loader", title: "Loader" },
+    { id: "markdown", title: "Markdown" },
+    { id: "model-selector", title: "ModelSelector" },
+    { id: "prompt-input", title: "PromptInput" },
+    { id: "prompt-suggestion", title: "PromptSuggestion" },
+    { id: "reasoning", title: "Reasoning" },
+    { id: "text-shimmer", title: "TextShimmer" },
+  ],
+};
+
 /* 独立 demo 页首的浅/深色切换按钮（只在 standalone 时渲染）。
  * 与控制台顶栏共用同一份主题状态（useShellTheme ← ThemeController
  * 的唯一 useTheme 实例），不是第二个 useTheme；是真的 <button>，
@@ -3310,22 +3541,37 @@ export function ComponentLibraryPage({ navigate, standalone }: { navigate?: Navi
     return () => obs.disconnect();
   }, []);
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-5 sm:px-6">
+    <div className="mx-auto flex w-full max-w-6xl gap-6 px-4 py-5 sm:px-6">
+      <nav aria-label="分组导航" className="sticky top-5 hidden h-fit w-52 shrink-0 lg:block">
+        <p className="mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-[var(--dim)]">分组</p>
+        <div className="space-y-0.5">
+          {LIB_SECTIONS.map((s) => (
+            <button key={s.id} type="button" onClick={() => document.getElementById(`section-${s.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })} aria-current={activeSection === s.id ? "true" : undefined} className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm ${activeSection === s.id ? "bg-[var(--surface-3)] font-semibold text-[var(--text)]" : "text-[var(--text-2)] hover:bg-[var(--surface-2)]"}`}>
+              <span aria-hidden="true" className={`mr-2 h-1.5 w-1.5 shrink-0 rounded-full ${activeSection === s.id ? "bg-[var(--accent)]" : "bg-[var(--border-strong)]"}`} />
+              {s.title}
+            </button>
+          ))}
+        </div>
+      </nav>
+      <div className="min-w-0 flex-1 space-y-8">
       <div>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-lg font-bold">组件库</h1>
+            <h1 className="text-[30px] font-bold leading-9 tracking-tight">组件库</h1>
             <p className="mt-1 text-[13px] leading-6 text-[var(--dim)]">
               对照表 52 行（AI 类 1 行含 18 件，合计 69 个组件条目），每个条目都是真实可用的组件——与产品页共用同一份组件代码（ui.tsx 共享导出 + @heroui/react 3.2.8 免费版 + Recharts），演示用的 mock 只是数据，不调任何后端接口。已落地的条目链去产品页；表格基建（R2-1）、共享行组件（R2-2）、总览 KPI / 图表（R2-3）按批次指向，不在这里重复造。
             </p>
           </div>
           {standalone ? <StandaloneThemeToggle /> : null}
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {LIB_SECTIONS.map((s) => (
-            <Button key={s.id} size="sm" className={activeSection === s.id ? LIB_DARK_ACCENT_FIX_CLASS : ""} variant={activeSection === s.id ? "primary" : "secondary"} onClick={() => document.getElementById(`section-${s.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}>{s.title}</Button>
-          ))}
-        </div>
+        <details className="mt-3 lg:hidden">
+          <summary className="cursor-pointer text-sm font-medium text-[var(--text-2)]">分组导航</summary>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {LIB_SECTIONS.map((s) => (
+              <Button key={s.id} size="sm" className={activeSection === s.id ? LIB_DARK_ACCENT_FIX_CLASS : ""} variant={activeSection === s.id ? "primary" : "secondary"} onClick={() => document.getElementById(`section-${s.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}>{s.title}</Button>
+            ))}
+          </div>
+        </details>
       </div>
       <ShellSection navigate={navigate} />
       <DataSection navigate={navigate} />
@@ -3334,6 +3580,15 @@ export function ComponentLibraryPage({ navigate, standalone }: { navigate?: Navi
       <OverlaySection navigate={navigate} sections={LIB_SECTIONS} activeSection={activeSection} />
       <HeavySection />
       <AiSection />
+      </div>
+      <nav aria-label="本页目录" className="sticky top-5 hidden h-fit w-48 shrink-0 xl:block">
+        <p className="mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-[var(--dim)]">本页目录</p>
+        <div className="space-y-0.5">
+          {(LIB_ENTRIES[activeSection] ?? []).map((e) => (
+            <button key={e.id} type="button" onClick={() => document.getElementById(`entry-${e.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })} className="block w-full truncate rounded-lg px-2.5 py-1.5 text-left text-[13px] text-[var(--text-2)] transition hover:bg-[var(--surface-2)] hover:text-[var(--text)]">{e.title}</button>
+          ))}
+        </div>
+      </nav>
     </div>
   );
 }

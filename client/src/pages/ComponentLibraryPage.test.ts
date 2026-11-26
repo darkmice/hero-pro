@@ -165,3 +165,54 @@ describe("standaloneThemeToggleLabel（两态 aria-label 不同）", () => {
     expect(standaloneThemeToggleLabel("dark")).not.toBe(standaloneThemeToggleLabel("light"));
   });
 });
+
+/* style-polish 批（2026-11-26）单测：只测新增/改动的导出纯函数，不渲染
+   组件；渲染后的计算样式走浏览器探针锁定。 */
+
+import { photoAvatarImg, photoAvatarUrl, modelVendorTone, fileTreeIconTone, agendaEventSoft } from "./ComponentLibraryPage";
+
+describe("photoAvatarUrl（C08 照片头像占位）", () => {
+  test("同一名字永远同一张，号段 1–70，pravatar 80px", () => {
+    expect(photoAvatarUrl("Ada")).toBe(photoAvatarUrl("Ada"));
+    expect(photoAvatarImg("Ada")).toBeGreaterThanOrEqual(1);
+    expect(photoAvatarImg("Ada")).toBeLessThanOrEqual(70);
+    expect(photoAvatarUrl("Ada")).toMatch(/^https:\/\/i\.pravatar\.cc\/80\?img=\d+$/);
+  });
+  test("5 个 mock 用户取 5 张不同照片（哈希分散）", () => {
+    const imgs = new Set(["Ada", "Grace", "Linus", "小白", "老板"].map(photoAvatarImg));
+    expect(imgs.size).toBe(5);
+  });
+});
+
+describe("modelVendorTone（J-M1 厂商色 soft 底）", () => {
+  test("Google 青系、Anthropic 紫系、OpenAI 琥珀系，三档不同", () => {
+    expect(modelVendorTone("Google")).toContain("var(--accent-bg)");
+    expect(modelVendorTone("Anthropic")).toContain("var(--violet-bg)");
+    expect(modelVendorTone("OpenAI")).toContain("var(--warn-bg)");
+    expect(modelVendorTone("Google")).not.toBe(modelVendorTone("Anthropic"));
+    expect(modelVendorTone("Anthropic")).not.toBe(modelVendorTone("OpenAI"));
+  });
+});
+
+describe("fileTreeIconTone（J-F1 按类型着色）", () => {
+  test("文件夹 warn、.tsx/.ts accent、.md 与其他 dim", () => {
+    expect(fileTreeIconTone("src", "folder").wrap).toContain("var(--warn-bg)");
+    expect(fileTreeIconTone("src", "folder").filled).toBe(true);
+    expect(fileTreeIconTone("ui.tsx", "file").wrap).toContain("var(--accent-bg)");
+    expect(fileTreeIconTone("route.ts", "file").wrap).toContain("var(--accent-bg)");
+    expect(fileTreeIconTone("README.md", "file").wrap).toContain("var(--surface-3)");
+    expect(fileTreeIconTone("README.md", "file").filled).toBe(false);
+  });
+});
+
+describe("agendaEventSoft（C07 事件块 soft 配色）", () => {
+  test("6 个 mock 色值各有 soft 对，未知色落 surface-3 + dim", () => {
+    expect(agendaEventSoft("#0e7490")).toEqual({ background: "var(--accent-bg)", color: "var(--accent-strong)" });
+    expect(agendaEventSoft("#dc2626")).toEqual({ background: "var(--danger-bg)", color: "var(--danger)" });
+    expect(agendaEventSoft("#7c3aed")).toEqual({ background: "var(--violet-bg)", color: "var(--violet-strong)" });
+    expect(agendaEventSoft("#047857")).toEqual({ background: "var(--ok-bg)", color: "var(--ok)" });
+    expect(agendaEventSoft("#b45309")).toEqual({ background: "var(--warn-bg)", color: "var(--warn)" });
+    expect(agendaEventSoft("#ff0000")).toEqual({ background: "var(--surface-3)", color: "var(--dim)" });
+    expect(agendaEventSoft(undefined)).toEqual({ background: "var(--surface-3)", color: "var(--dim)" });
+  });
+});

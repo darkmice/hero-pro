@@ -1,0 +1,44 @@
+# Deploy demo to GitHub Pages
+# 打 demo-v* 标签即触发：构建 demo 并部署到 gh-pages 分支。
+# Pages 配置保持 Branch: gh-pages 不变，不改仓库设置。
+name: Deploy demo to GitHub Pages
+
+on:
+  push:
+    tags:
+      - "demo-v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # 必须以 demo/ 为 cwd 跑构建（Tailwind 内容扫描口径与 cwd 有关；
+      # 别的 cwd 跑产物内容 md5 对不上，JS 差 4 字节、CSS 差 14KB）。
+      - name: Build demo
+        working-directory: demo
+        run: bun demo-build.mjs --root .. --out ../demo-dist
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./demo-dist
+          publish_branch: gh-pages

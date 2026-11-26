@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="data:," />
+    <title>组件库 · 静态演示</title>
+    <!-- 与 live 的 client/index.html 同款防闪：先定主题再绘。 -->
+    <script>
+      try {
+        var storedTheme = localStorage.getItem("heroui-theme");
+        var resolvedTheme =
+          storedTheme === "light" || storedTheme === "dark"
+            ? storedTheme
+            : window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+        document.documentElement.classList.add(resolvedTheme);
+        document.documentElement.setAttribute("data-theme", resolvedTheme);
+      } catch (e) {}
+    </script>
+    
+  <link rel="stylesheet" crossorigin href="./assets/demo-index-zgye60x5.css"><script type="module" crossorigin src="./assets/demo-index-p736xhjz.js"></script></head>
+  <body>
+    <div data-demo-root=""></div>
+  </body>
+</html>

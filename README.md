@@ -9,8 +9,10 @@
   改动先走 live，再重新导出到这里；**绝不在 GitHub 上直接改源码**。
 - 这里**不含 TG 业务代码**：没有 App.tsx、actions.ts、server/、其他控制台页、Bot 代码。
   抽取范围就是 demo 构建的 import 闭包（见 `EXTRACTION.md`）：
-  `client/src/pages/ComponentLibraryPage.tsx` + `components/{ui,cellRows,kpi,charts}.tsx`
+  `client/src/pages/ComponentLibraryPage.tsx` + `components/{ui,cellRows,kpi,charts,dataTable}.tsx`
   + `themeController.tsx` + `route.ts`（仅 `RouteTab` 类型）+ `theme.css`。
+  v133 起库页用 TanStack Table（`dataTable.tsx` + `@tanstack/react-table` 9.3.1）；
+  `charts.tsx` 仍在闭包内（库页经 `kpi.tsx` 使用它的图表 tooltip 与图例配色）。
 - `demo/demo-main.tsx` 是去 SDK 化的演示入口：live 用 Hatch 本地 SDK 的
   `spaceQueryClient`，Actions 环境里没有那个 SDK；demo 不发任何 query/mutation，
   这里改用普通的 TanStack `QueryClient`（保留 `staleTime: 30_000`、
@@ -20,7 +22,7 @@
 
 1. 改 live 控制台源码，重新导出到这里（保持与 live 同步，见上）。
 2. 提交到 `main` 分支。
-3. 打标签：`git tag demo-v127 && git push origin demo-v127`
+3. 打标签：`git tag demo-v128 && git push origin demo-v128`
    （标签格式 `demo-v*`，数字与 live 版本对应）。
 4. GitHub Actions（`.github/workflows/deploy-demo.yml`）自动构建 demo
    并部署到 `gh-pages` 分支。Pages 配置保持 Branch: `gh-pages`，不用改仓库设置。
